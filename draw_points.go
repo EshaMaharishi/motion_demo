@@ -66,7 +66,14 @@ func main() {
 		}
 
 		fields := strings.Split(line, ",")
-		if len(fields) != 3 { fmt.Printf("Skipping malformed line: %s\n", line)
+
+        if (strings.HasPrefix(line, "#")) {
+            fmt.Printf("Skipping visual indicator line: %s\n", line)
+            continue
+        }
+
+		if len(fields) != 3 {
+            fmt.Printf("Skipping malformed line: %s\n", line)
 			continue
 		}
 
