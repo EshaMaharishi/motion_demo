@@ -3,7 +3,7 @@ from matplotlib.textpath import TextPath
 
 # Adjust font size and spacing as needed
 size = 45
-spacing = 30
+spacing = 32
 
 text = input("Enter the text to convert into 3D points: ")
 
