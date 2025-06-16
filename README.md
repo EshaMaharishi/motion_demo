@@ -1,7 +1,8 @@
 # Summary
 This script takes a user's input text and instructs a Viam machine containing a robotic arm to draw the text.
 
-![IMG_9657](https://github.com/user-attachments/assets/7ee0824a-fba0-4d1a-bc94-e8441774a8b8)
+![IMG_0709](https://github.com/user-attachments/assets/939476a1-7692-4a13-9892-7898dc6c4a62)
+
 
 # Instructions
 
