@@ -1,17 +1,21 @@
 import numpy as np
 from matplotlib.textpath import TextPath
 
+# Adjust font size and spacing as needed
+size = 4
+spacing = 30
+
 text = input("Enter the text to convert into 3D points: ")
 
-# Letter spacing
 x_offset = 0.0
-spacing = 1.2  # Adjust spacing as needed
 
 with open("points3d.txt", "w") as f:
-    f.write("x, y, z  # letter\n\n")
+    f.write("x, y, z  # letter\n")
 
     for letter in text:
-        tp = TextPath((0, 0), letter, size=1)
+        print("Writing points for letter", letter)
+
+        tp = TextPath((0, 0), letter, size=size)
         points_2d = tp.vertices
 
         # Make points_2d writeable

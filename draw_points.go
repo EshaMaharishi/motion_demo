@@ -4,6 +4,7 @@ import (
     "bufio"
 	"context"
     "fmt"
+    "math"
 	"os"
 	"strconv"
 	"strings"
@@ -28,35 +29,41 @@ var API_KEY = "your string here"
 var ARM_RESOURCE_NAME = "your string here"
 
 // Text info
-var POSE_COLOR = "#EF5350"
-var TEXT_SIZE_MULTIPLIER float64 = 45
+var POSE_COLOR_1 = "#EF5350"
+var POSE_COLOR_2 = "#377EB8"
+var POSE_COLOR_3 = "#4DAF4A"
 
 // End effector position when pen touching paper where you want to start writing from
 var END_EFFECTOR_X_WHEN_PEN_TOUCHING_PAPER float64 = 53.81019226834298
 var END_EFFECTOR_Y_WHEN_PEN_TOUCHING_PAPER float64 = 261.357484082354 
-var END_EFFECTOR_Z_WHEN_PEN_TOUCHING_PAPER float64 = 57.03686307529803
+var END_EFFECTOR_Z_WHEN_PEN_TOUCHING_PAPER float64 = 58.03686307529803
 var ADDITIONAL_BUFFER_Z float64 = 20 // The initial position will be this many mm above the paper
-var END_EFFECTOR_OV_X_WHEN_PEN_TOUCHING_PAPER float64 = 0.348899278145762
-var END_EFFECTOR_OV_Y_WHEN_PEN_TOUCHING_PAPER float64 = 0.0000407496998468827
-var END_EFFECTOR_OV_Z_WHEN_PEN_TOUCHING_PAPER float64 = -0.937160228407803
-var END_EFFECTOR_OV_THETA_WHEN_PEN_TOUCHING_PAPER float64 = 0.007265004379393861
+var END_EFFECTOR_OV_X_WHEN_PEN_TOUCHING_PAPER float64 = 0.12923694451632337
+var END_EFFECTOR_OV_Y_WHEN_PEN_TOUCHING_PAPER float64 = 0.30222728998800824
+var END_EFFECTOR_OV_Z_WHEN_PEN_TOUCHING_PAPER float64 = -0.9444344748888563
+var END_EFFECTOR_OV_THETA_WHEN_PEN_TOUCHING_PAPER float64 = 66.85935203732203
 
 func main() {
     vizClient.RemoveAllSpatialObjects()
 
+    // Variables to save the points read from the file
+    var points [][][]float64    // 3D slice: points[letterIndex][pointIndex][xyz]
+    var currentLetterPoints [][]float64
+
+    // Variables to save the poses to move through
 	var end_effector_poses []spatialmath.Pose
 	var end_effector_colors []string
 
+    // Open the file where the points were written
 	file, err := os.Open("./generate_points/points3d.txt")
 	if err != nil {
 		panic(err)
 	}
 	defer file.Close()
 
-	var points [][]float64
+    // Read in the points from the file
 	scanner := bufio.NewScanner(file)
 	lineNum := 0
-
 	for scanner.Scan() {
 		line := scanner.Text()
 		if lineNum == 0 {
@@ -65,17 +72,24 @@ func main() {
 			continue
 		}
 
-		fields := strings.Split(line, ",")
-
-        if (strings.HasPrefix(line, "#")) {
-            fmt.Printf("Skipping visual indicator line: %s\n", line)
+        // When a visual indicator line is found, start a new letter group
+        if strings.HasPrefix(line, "# --- Letter:") {
+            if len(currentLetterPoints) > 0 {
+                // Save the previous letter's points before starting a new group
+                points = append(points, currentLetterPoints)
+            }
+            currentLetterPoints = [][]float64{} // reset for new letter
+            fmt.Printf("Loading points for letter: %s\n", line)
             continue
         }
+
+		fields := strings.Split(line, ",")
 
 		if len(fields) != 3 {
             fmt.Printf("Skipping malformed line: %s\n", line)
 			continue
 		}
+
 
 		point := make([]float64, 3)
 		for i, field := range fields {
@@ -84,34 +98,78 @@ func main() {
 				fmt.Printf("Error parsing float: %v\n", err)
 				continue
 			}
-			point[i] = val * TEXT_SIZE_MULTIPLIER
+			point[i] = val
 		}
 
-		points = append(points, point)
+        if (point[0] == math.Floor(point[0]) && point[1] == math.Floor(point[1])) {
+            print("Skipping anchor point\n")
+            continue
+        }
+
+        currentLetterPoints = append(currentLetterPoints, point)
 		lineNum++
 	}
-
+    if len(currentLetterPoints) > 0 { // Save the final letter's points
+        points = append(points, currentLetterPoints)
+    }
 	if err := scanner.Err(); err != nil {
 		panic(err)
 	}
 
-	// Construct and print a Pose for each point
-	for _, pt := range points {
-		x, y, z := pt[0], pt[1], pt[2]
+	// Construct the list of Poses the arm should move through to write the text
+    for _, letter := range points {
+        print("Generating poses for new letter\n")
+        for i, pt := range letter {
+            x, y, z := pt[0], pt[1], pt[2]
 
-		end_effector_pose := spatialmath.NewPose(
-			r3.Vector{X: x + END_EFFECTOR_X_WHEN_PEN_TOUCHING_PAPER, Y: y + END_EFFECTOR_Y_WHEN_PEN_TOUCHING_PAPER, Z: z + END_EFFECTOR_Z_WHEN_PEN_TOUCHING_PAPER},
-			&spatialmath.OrientationVectorDegrees{
-				OX: END_EFFECTOR_OV_X_WHEN_PEN_TOUCHING_PAPER,
-				OY: END_EFFECTOR_OV_Y_WHEN_PEN_TOUCHING_PAPER,
-				OZ: END_EFFECTOR_OV_Z_WHEN_PEN_TOUCHING_PAPER,
-				Theta: END_EFFECTOR_OV_THETA_WHEN_PEN_TOUCHING_PAPER,
-			},
-		)
+            // Always start a new letter at a pose above (positive z) its first point
+            if (i == 0) {
+                liftedPose := spatialmath.NewPose(
+                    r3.Vector{X: x + END_EFFECTOR_X_WHEN_PEN_TOUCHING_PAPER, Y: y + END_EFFECTOR_Y_WHEN_PEN_TOUCHING_PAPER, Z: z + END_EFFECTOR_Z_WHEN_PEN_TOUCHING_PAPER + ADDITIONAL_BUFFER_Z},
+                    &spatialmath.OrientationVectorDegrees{
+                        OX: END_EFFECTOR_OV_X_WHEN_PEN_TOUCHING_PAPER,
+                        OY: END_EFFECTOR_OV_Y_WHEN_PEN_TOUCHING_PAPER,
+                        OZ: END_EFFECTOR_OV_Z_WHEN_PEN_TOUCHING_PAPER,
+                        Theta: END_EFFECTOR_OV_THETA_WHEN_PEN_TOUCHING_PAPER,
+                    },
+                )
+                end_effector_poses = append(end_effector_poses, liftedPose)
+                end_effector_colors = append(end_effector_colors, POSE_COLOR_2)
+            }
 
-		end_effector_poses = append(end_effector_poses, end_effector_pose)
-		end_effector_colors = append(end_effector_colors, POSE_COLOR)
-	}
+            // Add the current point for the letter as a pose
+            end_effector_pose := spatialmath.NewPose(
+                r3.Vector{X: x + END_EFFECTOR_X_WHEN_PEN_TOUCHING_PAPER, Y: y + END_EFFECTOR_Y_WHEN_PEN_TOUCHING_PAPER, Z: z + END_EFFECTOR_Z_WHEN_PEN_TOUCHING_PAPER},
+                &spatialmath.OrientationVectorDegrees{
+                    OX: END_EFFECTOR_OV_X_WHEN_PEN_TOUCHING_PAPER,
+                    OY: END_EFFECTOR_OV_Y_WHEN_PEN_TOUCHING_PAPER,
+                    OZ: END_EFFECTOR_OV_Z_WHEN_PEN_TOUCHING_PAPER,
+                    Theta: END_EFFECTOR_OV_THETA_WHEN_PEN_TOUCHING_PAPER,
+                },
+            )
+            end_effector_poses = append(end_effector_poses, end_effector_pose)
+            if (i == len(letter) - 1) {
+                end_effector_colors = append(end_effector_colors, POSE_COLOR_3)
+            } else {
+                end_effector_colors = append(end_effector_colors, POSE_COLOR_1)
+            }
+
+            // Always end a letter at a pose above (positive z) its last point
+            if (i == len(letter) - 1) {
+                liftedPose := spatialmath.NewPose(
+                    r3.Vector{X: x + END_EFFECTOR_X_WHEN_PEN_TOUCHING_PAPER, Y: y + END_EFFECTOR_Y_WHEN_PEN_TOUCHING_PAPER, Z: z + END_EFFECTOR_Z_WHEN_PEN_TOUCHING_PAPER + ADDITIONAL_BUFFER_Z},
+                    &spatialmath.OrientationVectorDegrees{
+                        OX: END_EFFECTOR_OV_X_WHEN_PEN_TOUCHING_PAPER,
+                        OY: END_EFFECTOR_OV_Y_WHEN_PEN_TOUCHING_PAPER,
+                        OZ: END_EFFECTOR_OV_Z_WHEN_PEN_TOUCHING_PAPER,
+                        Theta: END_EFFECTOR_OV_THETA_WHEN_PEN_TOUCHING_PAPER,
+                    },
+                )
+                end_effector_poses = append(end_effector_poses, liftedPose)
+                end_effector_colors = append(end_effector_colors, POSE_COLOR_2)
+            }
+        }
+    }
 
     // Send the poses to the visualizer
 	err = vizClient.DrawPoses(end_effector_poses, end_effector_colors, true)
@@ -119,21 +177,17 @@ func main() {
         panic(err)
 	}
 
+    // Ask if the user wants to proceed with moving the arm through the poses
 	reader := bufio.NewReader(os.Stdin)
-
 	fmt.Print("Done generating poses! Look at the visualizer output. Do you want to continue to move the arm to the end_effector_poses? (y/n): ")
 	input, err := reader.ReadString('\n')
 	if err != nil {
 		fmt.Println("Error reading input:", err)
 		os.Exit(1)
 	}
-
-	// Normalize input
 	input = strings.TrimSpace(strings.ToLower(input))
-
 	if input == "y" || input == "yes" {
 		fmt.Println("Continuing...")
-		// Add your logic here
 	} else {
 		fmt.Println("Exiting.")
 		os.Exit(0)
@@ -163,7 +217,7 @@ func main() {
        logger.Fatal(err)
     }
 
-    // Move arm to the initial pose.
+    // Move arm to an initial pose.
     fmt.Print("Trying to move to initial pose: ")
     initialPose := spatialmath.NewPose(
         r3.Vector{X: END_EFFECTOR_X_WHEN_PEN_TOUCHING_PAPER, Y: END_EFFECTOR_Y_WHEN_PEN_TOUCHING_PAPER, Z: END_EFFECTOR_Z_WHEN_PEN_TOUCHING_PAPER + ADDITIONAL_BUFFER_Z},
